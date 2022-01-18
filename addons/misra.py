@@ -1211,7 +1211,13 @@ class Rule(object):
 
     @property
     def cppcheck_severity(self):
-        return 'style'
+        if self._misra_severity is not None:
+            if self._misra_severity == "Mandatory":
+                return 'error'
+            else:
+                return 'style'
+        else:
+            return 'style'
 
     def __repr__(self):
         return "%d.%d (%s)" % (self.num1, self.num2, self.misra_severity)
@@ -1432,23 +1438,6 @@ class MisraChecker:
                                  'wcscpy_s', 'wcsncpy_s', 'wmemcpy_s', 'wmemmove_s', 'wcscat_s', 'wcsncat_s', 'wcstok_s', 'wcsnlen_s',
                                  'wcrtomb_s', 'mbsrtowcs_s', 'wcsrtombs_s'):
                     self.reportError(token, 1, 4)
-
-    def misra_2_2(self, cfg):
-        for token in cfg.tokenlist:
-            if (token.str in '+-') and token.astOperand2:
-                if simpleMatch(token.astOperand1, '0'):
-                    self.reportError(token.astOperand1, 2, 2)
-                elif simpleMatch(token.astOperand2, '0'):
-                    self.reportError(token.astOperand2, 2, 2)
-            if token.str == '*' and token.astOperand2:
-                if simpleMatch(token.astOperand2, '0'):
-                    self.reportError(token.astOperand1, 2, 2)
-                elif simpleMatch(token.astOperand1, '0'):
-                    self.reportError(token.astOperand2, 2, 2)
-                elif simpleMatch(token.astOperand1, '1'):
-                    self.reportError(token.astOperand1, 2, 2)
-                elif simpleMatch(token.astOperand2, '1'):
-                    self.reportError(token.astOperand2, 2, 2)
 
     def misra_2_3(self, dumpfile, typedefInfo):
         self._save_ctu_summary_typedefs(dumpfile, typedefInfo)
@@ -1985,7 +1974,7 @@ class MisraChecker:
                 continue
             if not is_source_file(func.token.file):
                 continue
-            if func.token != func.tokenDef:
+            if func.token.file != func.tokenDef.file:
                 continue
             if func.tokenDef.str == 'main':
                 continue
@@ -2849,41 +2838,14 @@ class MisraChecker:
         state = 0
         indent = 0
         tok1 = None
-        def tokAt(tok,i):
-            while i < 0 and tok:
-                tok = tok.previous
-                if tok.str.startswith('//') or tok.str.startswith('/*'):
-                    continue
-                i += 1
-            while i > 0 and tok:
-                tok = tok.next
-                if tok.str.startswith('//') or tok.str.startswith('/*'):
-                    continue
-                i -= 1
-            return tok
-
-        def strtokens(tok, i1, i2):
-            tok1 = tokAt(tok, i1)
-            tok2 = tokAt(tok, i2)
-            tok = tok1
-            s = ''
-            while tok != tok2:
-                if tok.str.startswith('//') or tok.str.startswith('/*'):
-                    tok = tok.next
-                    continue
-                s += ' ' + tok.str
-                tok = tok.next
-            s += ' ' + tok.str
-            return s[1:]
-
         for token in rawTokens:
             if token.str in ['if', 'for', 'while']:
-                if strtokens(token,-1,0) == '# if':
+                if simpleMatch(token.previous, '# if'):
                     continue
-                if strtokens(token,-1,0) == "} while":
+                if simpleMatch(token.previous, "} while"):
                     # is there a 'do { .. } while'?
-                    start = rawlink(tokAt(token,-1))
-                    if start and strtokens(start, -1, 0) == 'do {':
+                    start = rawlink(token.previous)
+                    if start and simpleMatch(start.previous, 'do {'):
                         continue
                 if state == 2:
                     self.reportError(tok1, 15, 6)
@@ -2891,9 +2853,9 @@ class MisraChecker:
                 indent = 0
                 tok1 = token
             elif token.str == 'else':
-                if strtokens(token,-1,0) == '# else':
+                if simpleMatch(token.previous, '# else'):
                     continue
-                if strtokens(token,0,1) == 'else if':
+                if simpleMatch(token, 'else if'):
                     continue
                 if state == 2:
                     self.reportError(tok1, 15, 6)
@@ -3125,11 +3087,6 @@ class MisraChecker:
                         if tok.function and tok.function == call:
                             self.reportError(tok, 17, 2)
                         tok = tok.next
-
-    def misra_17_3(self, cfg):
-        for w in cfg.clang_warnings:
-            if w['message'].endswith('[-Wimplicit-function-declaration]'):
-                self.reportError(cppcheckdata.Location(w), 17, 3)
 
     def misra_17_6(self, rawTokens):
         for token in rawTokens:
@@ -4249,7 +4206,6 @@ class MisraChecker:
                 self.printStatus('Checking %s, config %s...' % (dumpfile, cfg.name))
 
             self.executeCheck(104, self.misra_1_4, cfg)
-            self.executeCheck(202, self.misra_2_2, cfg)
             self.executeCheck(203, self.misra_2_3, dumpfile, cfg.typedefInfo)
             self.executeCheck(204, self.misra_2_4, dumpfile, cfg)
             self.executeCheck(205, self.misra_2_5, dumpfile, cfg)
@@ -4344,7 +4300,6 @@ class MisraChecker:
             self.executeCheck(1607, self.misra_16_7, cfg)
             self.executeCheck(1701, self.misra_17_1, cfg)
             self.executeCheck(1702, self.misra_17_2, cfg)
-            self.executeCheck(1703, self.misra_17_3, cfg)
             if cfgNumber == 0:
                 self.executeCheck(1706, self.misra_17_6, data.rawTokens)
             self.executeCheck(1707, self.misra_17_7, cfg)
